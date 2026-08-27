@@ -6,15 +6,23 @@ const KLUCZE_WARTOSCI = [
 ];
 
 const KATEGORIE_SKLADNIKOW = {
-    ryba: ["ryba", "ryby", "mintaj", "dorsz", "łosoś", "losos", "makrela", "filet z ryby", "morszczuk", "śledź", "sledz", "pstrąg", "pstrag", "halibut", "okoń morski", "okon morski", "sandacz", "tuńczyk", "tunczyk"],
+    ryba: ["ryba", "ryby", "mintaj", "dorsz", "łosoś", "losos", "makrela", "filet z ryby", "morszczuk", "śledź", "sledz", "pstrąg", "pstrag", "halibut", "okoń morski", "okon morski", "sandacz"],
     straczki: ["fasol", "ciecierzyc", "soczewic", "groch", "bób", "bob", "strączk", "straczk", "hummus"],
     mieso_swieze: ["wieprzow", "wołow", "wolow", "drobiow", "kurczak", "indyk", "schab", "karkówk", "karkowk", "mięso", "mieso", "kotlet", "mielone", "wołowin", "wolowin"],
     mieso_przetworzone: ["kiełbas", "kielbas", "wędlin", "wedlin", "mortadel", "pasztet", "gotowy kotlet", "gotowy sznycel", "konserwa", "parówk", "parowk", "boczek"],
     nabial_jajo: ["mleko", "śmietana", "smietana", "ser ", "jogurt", "jajko", "jajo", "twaróg", "twarog", "masło", "maslo", "kefir", "serek", "maślank", "maslank"],
-    warzywo: ["marchew", "pietruszk", "seler", "kapust", "burak", "ogórek", "ogorek", "pomidor", "cebul", "brokuł", "brokul", "szpinak", "papryk", "cukini", "por ", "groszek", "fasolka ziel", "kalafior", "rzepa", "dynia", "sałat", "salat", "szczypior"],
+    warzywo: ["marchew", "pietruszk", "seler", "kapust", "burak", "ogórek", "ogorek", "pomidor", "cebul", "brokuł", "brokul", "szpinak", "papryk", "cukini", "por ", "groszek", "fasolka ziel"],
     owoc: ["jabłk", "jablk", "gruszk", "truskaw", "borówk", "borowk", "malin", "porzeczk", "morela", "śliw", "sliw", "banan", "cytrus", "pomarańcz", "pomaranc"],
     caloziarniste: ["pełnoziarnist", "pelnoziarnist", "całoziarnist", "caloziarnist", "żytni", "zytni", "pszenny", "orkisz", "żyto", "zyto", "owies", "kasza", "otręb", "otreb", "razow"]
 };
+
+// Słowa-klucze dla wykrywania produktów wysoko przetworzonych (UPF)
+const PRODUKTY_WYSOKO_PRZETWORZONE = [
+    "concentrat", "syrop", "high fructose", "high corn",
+    "flavor", "emulgator", "barwnik", "konserwant",
+    "aromata", "polisorbat", "sorbian", "sulfite", "koncentrat", "dżem", "parówki", "parowk", "kiełbasa", "ketchup", "majonez",
+    "dżem", "gotowy sos", "instant", "instantowy"
+];
 
 function tekstySkladnikow(danie) {
     return (danie.skladniki || []).map(function(s) {
@@ -27,6 +35,25 @@ function pasujeDoKategorii(teksty, kategoria) {
     return teksty.some(function(t) {
         return slowa.some(function(slowo) {
             return t.indexOf(slowo) !== -1;
+        });
+    });
+}
+
+// Sprawdza czy w składnikach występują słowa sugerujące wysoko przetworzony produkt
+function czySkladnikiWysokoPrzetworzone(skladniki) {
+    if (!skladniki || skladniki.length === 0) return false;
+
+    return skladniki.some(function(sk) {
+        const nazwa = (sk.nazwa || "").toLowerCase();
+
+        // Jeśli produkt jest w bazie i ma flagę, honorujemy ją
+        if (sk.kod_kreskowy && state.produktyPoKodzie) {
+            const prod = state.produktyPoKodzie.get(sk.kod_kreskowy);
+            if (prod && prod.ultra_processed_food) return true;
+        }
+
+        return PRODUKTY_WYSOKO_PRZETWORZONE.some(function(key) {
+            return nazwa.indexOf(key) !== -1;
         });
     });
 }
@@ -87,6 +114,9 @@ function ocenZgodnoscDania(danie, kontekst) {
     const zawiera_ziarno_caloziarniste = pasujeDoKategorii(teksty, "caloziarniste");
     const danie_roslinne_bez_odzwierzecych = !zawiera_ryba && !zawiera_mieso_swieze && !zawiera_mieso_przetworzone && !zawiera_nabial_jajo;
 
+    // Wykrywanie produktów wysoko przetworzonych (UPF)
+    const zawiera_upf = czySkladnikiWysokoPrzetworzone(danie.skladniki);
+
     const cechy_dania = {
         smazone: !!kontekst.smazone,
         zawiera_ryba: zawiera_ryba,
@@ -95,13 +125,18 @@ function ocenZgodnoscDania(danie, kontekst) {
         zupa_na_wywarze_warzywnym: kontekst.typ_posilku === "zupa_czesc_dwudaniowego" ? !!kontekst.wywarWarzywny : false,
         zawiera_warzywo_lub_owoc: zawiera_warzywo_lub_owoc,
         zawiera_koncentrat: !!kontekst.koncentrat,
-        zawiera_ziarno_caloziarniste: zawiera_ziarno_caloziarniste
+        zawiera_ziarno_caloziarniste: zawiera_ziarno_caloziarniste,
+        ultra_processed: !!zawiera_upf
     };
 
     const uwagi = [];
 
     if (zawiera_mieso_przetworzone) {
         uwagi.push("Zawiera mięso przetworzone (wędliny/gotowe wyroby) - niedozwolone od 09.2026, dozwolone jest tylko mięso świeże.");
+    }
+
+    if (zawiera_upf) {
+        uwagi.push("Zawiera produkty wysoko przetworzone (UPF) — ograniczaj do maks. 1 porcji tygodniowo.");
     }
 
     let energia_zgodna_z_udzialem_docelowym = null;
@@ -335,13 +370,14 @@ function renderujOceneZgodnosci(danie) {
         ["zupa_na_wywarze_warzywnym", "Zupa na wywarze warzywnym"],
         ["zawiera_ziarno_caloziarniste", "Zawiera produkt pełnoziarnisty"],
         ["smazone", "Danie smażone"],
-        ["zawiera_koncentrat", "Zawiera koncentrat"]
+        ["zawiera_koncentrat", "Zawiera koncentrat"],
+        ["ultra_processed", "Zawiera produkty wysoko przetworzone (UPF)"]
     ];
 
     const znacznikiCech = etykietyCech.map(function(para) {
         const wartosc = cechy[para[0]];
 
-        if (para[0] === "smazone" || para[0] === "zawiera_koncentrat") {
+        if (para[0] === "smazone" || para[0] === "zawiera_koncentrat" || para[0] === "ultra_processed") {
             if (wartosc) {
                 return `<span class="tag bad">⚠️ ${para[1]}</span>`;
             }
@@ -434,7 +470,7 @@ function generujPrzepis(danie) {
         }
     } else {
         if (ryby.length) {
-            const metoda = nazwaLower.indexOf("smaż") !== -1 || nazwaLower.indexOf("smaz") !== -1 ? "usmaż na patelni z niewielką ilością oleju" : "upiecz w piekarniku nagrzanym do ok. 190°C przez 15-20 minut";
+            const metoda = nazwaLower.indexOf("smaż") !== -1 || nazwaLower.indexOf("smaz") !== -1 ? "usmaż na patelni z niewielką ilością oleju" : "upiecz w piekarniku nagrzanym do ok. 190°C";
             kroki.push(`${listuj(ryby)} dopraw przyprawami i ${metoda}, aż mięso ryby będzie białe i łatwo się rozdzieli.`);
         } else if (mieso.length) {
             const metoda = nazwaLower.indexOf("piecz") !== -1 ? "upiecz w piekarniku nagrzanym do ok. 190°C przez 20-25 minut" : "podsmaż na patelni, a następnie duś pod przykryciem do miękkości";
@@ -571,7 +607,8 @@ function dodajDanieDoPosilku(danie, alergeny) {
     }
 
     if (alergeny.length > 0) {
-        const potwierdzone = confirm(`Uwaga - "${danie.nazwa}" zawiera alergeny: ${alergeny.map(etykietaAlergenu).join(", ")}.\nCzy na pewno dodać to danie do posiłku?`);
+        const potwierdzone = confirm(`Uwaga - "${danie.nazwa}" zawiera alergeny: ${alergeny.map(etykietaAlergenu).join(", ")}.
+Czy na pewno dodać to danie do posiłku?`);
 
         if (!potwierdzone) {
             return;
